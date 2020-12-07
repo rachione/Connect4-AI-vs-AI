@@ -1,4 +1,4 @@
-import io
+import os
 import signal
 import sys
 import time
@@ -14,8 +14,9 @@ class Connect4:
                                            logfile=sys.stdout.buffer)
 
     def read(self):
-        self.proc.expect('.*: ')
-        return 'f.getvalue()'
+        self.proc.expect(': ')
+        # byte to str
+        return self.proc.before.decode("utf-8")
 
     def send(self, arg):
         self.proc.sendline(arg)
@@ -29,7 +30,6 @@ class Connect4:
         return youWon in text
 
     def isError(self, text):
-        print('ddddddd: ' + text)
         fullCol = 'That column is full. Please try a different column'
         youLost = 'Player X has won the game!'
         return fullCol in text or youLost in text
@@ -46,8 +46,8 @@ class Connect4:
         while True:
             input = self.get_input()
             outputs = net.activate(input)
-            number = outputs.index(max(outputs))
-            text = self.playChess(number)
+            answer = self.get_answer(outputs)
+            text = self.playChess(answer)
 
             if self.isError(text):
                 break
@@ -55,7 +55,6 @@ class Connect4:
                 genome.fitness += 100
                 break
             genome.fitness += 1
-            time.sleep(10)
 
         self.kill()
 
@@ -67,6 +66,10 @@ class Connect4:
     # input data
     def get_input(self):
         return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    # output data
+    def get_answer(self, outputs):
+        return outputs.index(max(outputs)) + 1
 
     def kill(self):
         os.kill(self.proc.pid, signal.SIGTERM)
