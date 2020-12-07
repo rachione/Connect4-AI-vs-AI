@@ -22,26 +22,39 @@ class Connect4:
         self.read()
         self.send(arg)
 
-    def start(self):
+    def start(self, genome):
+        net = neat.nn.FeedForwardNetwork.create(genome, config)
+        genome.fitness = 0
+
         args = ['4', '4', '4', '2', '2', '1']
         for arg in args:
             self.readAndSend(arg)
         self.read()
-        self.playChess(1)
-        self.playChess(2)
+
+        while True:
+            output = net.activate(self.get_data())
+            print('output: ' + output)
+            self.playChess(output)
+            genome.fitness += 1
+
         self.kill()
 
     def playChess(self, number):
         self.send(str(number))
         self.read()
 
+    #input data
+    def get_data(self):
+        pass
+
     def kill(self):
         os.kill(self.proc.pid, signal.SIGTERM)
 
 
-def run_car(genomes, config):
-    c4 = Connect4()
-    c4.start()
+def run_c4(genomes, config):
+    for _, g in genomes:
+        c4 = Connect4()
+        c4.start(g)
 
 
 if __name__ == "__main__":
@@ -49,6 +62,7 @@ if __name__ == "__main__":
     config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
                                 neat.DefaultSpeciesSet, neat.DefaultStagnation,
                                 config_path)
+    p = neat.Population(config)
     p.add_reporter(neat.StdOutReporter(True))
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
