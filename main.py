@@ -1,19 +1,21 @@
-import os
+import io
 import signal
 import sys
-import pexpect
 import time
 import neat
+import pexpect
 from pexpect import popen_spawn
 
 
 class Connect4:
+
     def __init__(self):
         self.proc = popen_spawn.PopenSpawn('GAME230-P1-Connect_Four.exe',
                                            logfile=sys.stdout.buffer)
 
     def read(self):
         self.proc.expect('.*: ')
+        return 'f.getvalue()'
 
     def send(self, arg):
         self.proc.sendline(arg)
@@ -21,6 +23,16 @@ class Connect4:
     def readAndSend(self, arg):
         self.read()
         self.send(arg)
+
+    def isWon(self, text):
+        youWon = 'Player O has won the game!'
+        return youWon in text
+
+    def isError(self, text):
+        print('ddddddd: ' + text)
+        fullCol = 'That column is full. Please try a different column'
+        youLost = 'Player X has won the game!'
+        return fullCol in text or youLost in text
 
     def start(self, genome):
         net = neat.nn.FeedForwardNetwork.create(genome, config)
@@ -32,20 +44,29 @@ class Connect4:
         self.read()
 
         while True:
-            output = net.activate(self.get_data())
-            print('output: ' + output)
-            self.playChess(output)
+            input = self.get_input()
+            outputs = net.activate(input)
+            number = outputs.index(max(outputs))
+            text = self.playChess(number)
+
+            if self.isError(text):
+                break
+            elif self.isWon(text):
+                genome.fitness += 100
+                break
             genome.fitness += 1
+            time.sleep(10)
 
         self.kill()
 
     def playChess(self, number):
         self.send(str(number))
-        self.read()
+        text = self.read()
+        return text
 
-    #input data
-    def get_data(self):
-        pass
+    # input data
+    def get_input(self):
+        return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
     def kill(self):
         os.kill(self.proc.pid, signal.SIGTERM)
