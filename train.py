@@ -13,6 +13,8 @@ from pexpect import popen_spawn
 from enum import Enum, auto
 
 Generation = 0
+ScreenW = 600
+ScreenH = 600
 
 
 class Chess(Enum):
@@ -31,76 +33,77 @@ class Result(Enum):
 
 class GameDebug:
 
-    def __init__(self):
-        self.screenW = 600
-        self.screenH = 600
-        pygame.init()
-        pygame.display.set_caption('AI vs AI Connect4')
-        self.screen = pygame.display.set_mode((self.screenW, self.screenH))
-        self.data = []
+    def __init__(self, lineCount):
+        self.lineCount = lineCount
+        self.cellSize = 50
+        self.chessSize = self.cellSize * self.lineCount
+        self.screen = pygame.display.get_surface()
+        self.screen.fill((255, 255, 255))
+        self.chessSurface = pygame.Surface((self.chessSize, self.chessSize))
+        self.drawChessInit()
+        self.drawGeneration()
 
     def input(self, data):
-        self.data = data
-        self.draw()
+        self.drawChess(data)
+
+    def getFontRect(self, txt):
+        font = pygame.font.SysFont("Arial", 30)
+        return font.render(txt, True, (0, 0, 0)).get_rect()
+
+    def drawTxt(self, txt, center):
+        font = pygame.font.SysFont("Arial", 30)
+        txtsurface = font.render(txt, True, (0, 0, 0))
+        txtsurface_rect = txtsurface.get_rect()
+        txtsurface_rect.center = center
+        self.screen.blit(txtsurface, txtsurface_rect)
+        pygame.display.update()
 
     def drawFitness(self, score):
-        font = pygame.font.SysFont("Arial", 30)
-        gtxt = font.render('Fitness: ' + str(score), True, (0, 0, 0))
-        gtxt_rect = gtxt.get_rect()
-        gtxt_rect.center = (gtxt_rect.width / 2 + 10,
-                            gtxt_rect.height / 2 + 40)
-        self.screen.blit(gtxt, gtxt_rect)
-        pygame.display.flip()
+        txt = 'Fitness: ' + str(score)
+        rect = self.getFontRect(txt)
+        self.drawTxt(txt, (rect.width / 2 + 10,
+                           rect.height / 2 + 40))
 
     def drawGeneration(self):
-        font = pygame.font.SysFont("Arial", 30)
-        gtxt = font.render('Generation: ' + str(Generation), True, (0, 0, 0))
-        gtxt_rect = gtxt.get_rect()
-        gtxt_rect.center = (gtxt_rect.width / 2 + 10,
-                            gtxt_rect.height / 2 + 10)
-        self.screen.blit(gtxt, gtxt_rect)
-        pygame.display.flip()
+        txt = 'Generation: ' + str(Generation)
+        rect = self.getFontRect(txt)
+        self.drawTxt(txt, (rect.width / 2 + 10,
+                           rect.height / 2 + 10))
 
     def drawResult(self, result):
-        font = pygame.font.SysFont("Arial", 30)
-        resultTxt = font.render(result.name, True, (0, 0, 0))
-        resultTxt_rect = resultTxt.get_rect()
-        resultTxt_rect.center = (self.screenW / 2, self.screenH - 50)
-        self.screen.blit(resultTxt, resultTxt_rect)
-        pygame.display.flip()
+        txt = result.name
+        self.drawTxt(txt, (ScreenW / 2, ScreenH - 50))
 
-    def draw(self):
-        def getColor(data):
-            if data == 0:
+    def drawChessInit(self):
+        # blue bg
+        self.chessSurface.fill((37, 106, 229))
+        self.drawChess([0] * self.lineCount * self.lineCount)
+
+    def drawChess(self, data):
+        def getColor(piece):
+            if piece == 0:
                 return (66, 66, 66)
-            elif data == 1:
+            elif piece == 1:
                 return (255, 237, 0)
             else:
                 return (224, 32, 26)
 
-        data = self.data
-        dataLen = len(data)
-        cellSize = 50
+        lineCount = self.lineCount
+        cellSize = self.cellSize
+        chessSize = self.chessSize
+        chessSurface = self.chessSurface
 
-        if dataLen == 0:
-            return
-        size = int(math.sqrt(dataLen))
-        self.screen.fill((255, 255, 255))
-        self.drawGeneration()
-        chess = pygame.Surface((cellSize * size, cellSize * size))
-        chess.fill((37, 106, 229))
-        for i in range(size):
-            for j in range(size):
-                index = i * size + j
+        for i in range(lineCount):
+            for j in range(lineCount):
+                index = i * lineCount + j
                 pos = (cellSize / 2 + cellSize * j,
                        cellSize / 2 + cellSize * i)
                 color = getColor(data[index])
-                pygame.draw.circle(chess, color, pos, 18)
+                pygame.draw.circle(chessSurface, color, pos, 18)
 
-        chessW, chessH = chess.get_size()
-        self.screen.blit(chess, ((self.screenW - chessW) / 2,
-                                 (self.screenH - chessH) / 2))
-        pygame.display.flip()
+        self.screen.blit(chessSurface, ((ScreenW - chessSize) / 2,
+                                        (ScreenH - chessSize) / 2))
+        pygame.display.update()
 
 
 class Evaluator:
@@ -161,8 +164,9 @@ class RemotedConnect4:
 
     def __init__(self):
         self.proc = popen_spawn.PopenSpawn('GAME230-P1-Connect_Four.exe')
-        self.gameDebug = GameDebug()
         #,logfile=sys.stdout.buffer
+        self.lineCount = 6
+        self.gameDebug = GameDebug(self.lineCount)
 
     def read(self):
         self.proc.expect(': ')
@@ -194,7 +198,7 @@ class RemotedConnect4:
         net = neat.nn.FeedForwardNetwork.create(genome, config)
         genome.fitness = 0
 
-        args = ['6', '6', '4', '2', '2', '1']
+        args = [str(self.lineCount), str(self.lineCount), '4', '2', '2', '1']
         for arg in args:
             self.readAndSend(arg)
         self.read()
@@ -225,10 +229,8 @@ class RemotedConnect4:
                 self.gameDebug.drawFitness(genome.fitness)
                 self.gameDebug.drawResult(result)
                 break
-            # time.sleep(0.1)
 
         time.sleep(0.1)
-
         self.kill()
 
     def playChess(self, number):
@@ -289,6 +291,10 @@ def run_c4(genomes, config):
 
 
 if __name__ == "__main__":
+    pygame.init()
+    pygame.display.set_caption('AI vs AI Connect4')
+    pygame.display.set_mode((ScreenW, ScreenH))
+
     config_path = "./config-feedforward.txt"
     config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
                                 neat.DefaultSpeciesSet, neat.DefaultStagnation,
