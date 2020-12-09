@@ -7,10 +7,18 @@ import time
 import neat
 import pexpect
 import math
+import itertools
+import numpy as np
 from pexpect import popen_spawn
 from enum import Enum, auto
 
 Generation = 0
+
+
+class Chess(Enum):
+    You = 1
+    Ai = -1
+    Empty = 0
 
 
 class Result(Enum):
@@ -22,7 +30,6 @@ class Result(Enum):
 
 
 class GameDebug:
-
     def __init__(self):
         self.screenW = 600
         self.screenH = 600
@@ -30,19 +37,26 @@ class GameDebug:
         pygame.display.set_caption('AI vs AI Connect4')
         self.screen = pygame.display.set_mode((self.screenW, self.screenH))
         self.data = []
-        self.draw()
 
     def input(self, data):
         self.data = data
         self.draw()
 
+    def drawFitness(self, score):
+        font = pygame.font.SysFont("Arial", 30)
+        gtxt = font.render('Fitness: ' + str(score), True, (0, 0, 0))
+        gtxt_rect = gtxt.get_rect()
+        gtxt_rect.center = (gtxt_rect.width / 2 + 10,
+                            gtxt_rect.height / 2 + 40)
+        self.screen.blit(gtxt, gtxt_rect)
+        pygame.display.flip()
+
     def drawGeneration(self):
         font = pygame.font.SysFont("Arial", 30)
-        gtxt = font.render(
-            'Generation: ' + str(Generation), True, (0, 0, 0))
+        gtxt = font.render('Generation: ' + str(Generation), True, (0, 0, 0))
         gtxt_rect = gtxt.get_rect()
-        gtxtW, gtxtH = gtxt.get_size()
-        gtxt_rect.center = (gtxtW / 2 + 10, gtxtH / 2 + 10)
+        gtxt_rect.center = (gtxt_rect.width / 2 + 10,
+                            gtxt_rect.height / 2 + 10)
         self.screen.blit(gtxt, gtxt_rect)
         pygame.display.flip()
 
@@ -50,39 +64,98 @@ class GameDebug:
         font = pygame.font.SysFont("Arial", 30)
         resultTxt = font.render(result.name, True, (0, 0, 0))
         resultTxt_rect = resultTxt.get_rect()
-        resultTxt_rect.center = (self.screenW / 2, 150)
+        resultTxt_rect.center = (self.screenW / 2, self.screenH - 50)
         self.screen.blit(resultTxt, resultTxt_rect)
         pygame.display.flip()
 
     def draw(self):
+        def getColor(data):
+            if data == 0:
+                return (66, 66, 66)
+            elif data == 1:
+                return (255, 237, 0)
+            else:
+                return (224, 32, 26)
+
         data = self.data
         dataLen = len(data)
-        self.screen.fill((255, 255, 255))
-        self.drawGeneration()
+        cellSize = 50
+
         if dataLen == 0:
             return
         size = int(math.sqrt(dataLen))
-        cellSize = 40
+        self.screen.fill((255, 255, 255))
+        self.drawGeneration()
         chess = pygame.Surface((cellSize * size, cellSize * size))
-        chess.fill((255, 255, 255))
+        chess.fill((37, 106, 229))
         for i in range(size):
             for j in range(size):
                 index = i * size + j
-                if data[index] == 0:
-                    continue
                 pos = (cellSize / 2 + cellSize * j,
                        cellSize / 2 + cellSize * i)
-                color = (0, 0, 255) if data[index] == 1 else (255, 0, 0)
-                pygame.draw.circle(chess, color, pos, 15)
+                color = getColor(data[index])
+                pygame.draw.circle(chess, color, pos, 18)
 
         chessW, chessH = chess.get_size()
-        self.screen.blit(chess, ((self.screenW - chessW) /
-                                 2, (self.screenH - chessH) / 2))
+        self.screen.blit(chess, ((self.screenW - chessW) / 2,
+                                 (self.screenH - chessH) / 2))
         pygame.display.flip()
 
 
-class RemotedConnect4:
+class Evaluator:
+    def __init__(self, chess, size, matrix):
+        self.size = size
+        self.chess = chess
+        self.matrix = matrix
+        self.score = {}
+        for i in range(2, self.size + 1):
+            self.score[i] = 0
 
+    def evaluateLine(self, line):
+        groups = [(x, len(list(y))) for x, y in itertools.groupby(line)]
+        for key, count in groups:
+            if (key == self.chess.value) & (count >= 2):
+                self.score[count] += 1
+
+    def evaluateMatrix(self):
+        matrix = self.matrix
+        size = self.size
+        #check horizontally
+        for i in range(size):
+            self.evaluateLine(matrix[i])
+
+        #check vertically
+        for i in range(size):
+            self.evaluateLine(matrix[:, i])
+
+        #check obliquely
+        for i in range(size - 1):
+            x = [k for k in range(0, size - i)]
+            y = [k for k in range(i, size)]
+            self.evaluateLine(matrix[x, y])
+            self.evaluateLine(matrix[x, [(size - k - 1) for k in y]])
+            if i > 0:
+                self.evaluateLine(matrix[y, x])
+                self.evaluateLine(matrix[[(size - k - 1) for k in x], y])
+
+    def getScore(self):
+        totalScore = 0
+        for key, value in self.score.items():
+            if (key == 2):
+                totalScore += 1 * value
+            elif (key == 3):
+                totalScore += 10 * value
+            if (key == 4) & (value >= 1):
+                totalScore += 100 * value
+
+        return totalScore
+
+    def evaluate(self):
+        self.evaluateMatrix()
+        return self.getScore()
+
+
+class RemotedConnect4:
     def __init__(self):
         self.proc = popen_spawn.PopenSpawn('GAME230-P1-Connect_Four.exe')
         self.gameDebug = GameDebug()
@@ -118,7 +191,7 @@ class RemotedConnect4:
         net = neat.nn.FeedForwardNetwork.create(genome, config)
         genome.fitness = 0
 
-        args = ['4', '4', '4', '2', '2', '1']
+        args = ['6', '6', '4', '2', '2', '1']
         for arg in args:
             self.readAndSend(arg)
         self.read()
@@ -129,7 +202,7 @@ class RemotedConnect4:
                     self.kill()
                     sys.exit(0)
             input = self.get_input()
-            genome.fitness = self.get_reward(input)
+            genome.fitness = self.evaluate_reward(input)
             outputs = net.activate(input)
             answer = self.get_answer(outputs)
             self.playChess(answer)
@@ -137,16 +210,21 @@ class RemotedConnect4:
 
             result = self.checkResult(text)
             if result == Result.Full:
+                genome.fitness = self.evaluate_reward(input)
+                genome.fitness -= 1000
+                self.gameDebug.drawFitness(genome.fitness)
                 self.gameDebug.drawResult(result)
                 break
-            elif result == Result.Tie or result == Result.Lost or result == Result.Won:
+            elif (result == Result.Tie) | (result == Result.Lost) | (
+                    result == Result.Won):
                 input = self.get_input()
-                genome.fitness = self.get_reward(input)
+                genome.fitness = self.evaluate_reward(input)
+                self.gameDebug.drawFitness(genome.fitness)
                 self.gameDebug.drawResult(result)
                 break
-            time.sleep(0.1)
+            #time.sleep(0.1)
 
-        time.sleep(0.5)
+        time.sleep(0.3)
 
         self.kill()
 
@@ -156,22 +234,30 @@ class RemotedConnect4:
         return text
 
     # calculate fitness
-    def get_reward(self, input):
-        return 1
-    # get text from stdout
+    def evaluate_reward(self, data):
 
+        size = int(math.sqrt(len(data)))
+        matrix = np.reshape(np.array(data), (size, size))
+
+        yourScore = Evaluator(Chess.You, size, matrix).evaluate()
+        AiScore = Evaluator(Chess.Ai, size, matrix).evaluate()
+
+        return yourScore - AiScore
+
+    # get text from stdout
     def get_text(self):
-        return self.proc.before.decode("utf-8").replace('\n', '').replace('\r', '')
+        return self.proc.before.decode("utf-8").replace('\n',
+                                                        '').replace('\r', '')
 
     # input data
     def get_input(self):
         def getVal(c):
+            chess = Chess.Empty
             if c == 'O':
-                return 1
+                chess = Chess.You
             elif c == 'X':
-                return -1
-            else:
-                return 0
+                chess = Chess.Ai
+            return chess.value
 
         text = self.get_text()
         match = re.findall('[1-9]([OX.]+)', text)
