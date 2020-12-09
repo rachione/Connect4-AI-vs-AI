@@ -22,7 +22,7 @@ class Chess(Enum):
 
 
 class Result(Enum):
-    Full = auto()
+    ColFull = auto()
     Won = auto()
     Tie = auto()
     Lost = auto()
@@ -30,6 +30,7 @@ class Result(Enum):
 
 
 class GameDebug:
+
     def __init__(self):
         self.screenW = 600
         self.screenH = 600
@@ -103,6 +104,7 @@ class GameDebug:
 
 
 class Evaluator:
+
     def __init__(self, chess, size, matrix):
         self.size = size
         self.chess = chess
@@ -120,15 +122,15 @@ class Evaluator:
     def evaluateMatrix(self):
         matrix = self.matrix
         size = self.size
-        #check horizontally
+        # check horizontally
         for i in range(size):
             self.evaluateLine(matrix[i])
 
-        #check vertically
+        # check vertically
         for i in range(size):
             self.evaluateLine(matrix[:, i])
 
-        #check obliquely
+        # check obliquely
         for i in range(size - 1):
             x = [k for k in range(0, size - i)]
             y = [k for k in range(i, size)]
@@ -156,6 +158,7 @@ class Evaluator:
 
 
 class RemotedConnect4:
+
     def __init__(self):
         self.proc = popen_spawn.PopenSpawn('GAME230-P1-Connect_Four.exe')
         self.gameDebug = GameDebug()
@@ -173,11 +176,11 @@ class RemotedConnect4:
 
     def checkResult(self, text):
         isTie = 'Tie game!' in text
-        isFull = 'That column is full. Please try a different column' in text
+        isColFull = 'That column is full. Please try a different column' in text
         isLost = 'Player X has won the game!' in text
         isWon = 'Player O has won the game!' in text
-        if isFull:
-            return Result.Full
+        if isColFull:
+            return Result.ColFull
         elif isLost:
             return Result.Lost
         elif isTie:
@@ -209,7 +212,7 @@ class RemotedConnect4:
             text = self.get_text()
 
             result = self.checkResult(text)
-            if result == Result.Full:
+            if result == Result.ColFull:
                 genome.fitness = self.evaluate_reward(input)
                 genome.fitness -= 1000
                 self.gameDebug.drawFitness(genome.fitness)
@@ -222,9 +225,9 @@ class RemotedConnect4:
                 self.gameDebug.drawFitness(genome.fitness)
                 self.gameDebug.drawResult(result)
                 break
-            #time.sleep(0.1)
+            # time.sleep(0.1)
 
-        time.sleep(0.3)
+        time.sleep(0.1)
 
         self.kill()
 
