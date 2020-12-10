@@ -8,16 +8,19 @@ import neat
 import pexpect
 import math
 import itertools
+import pickle
 import numpy as np
 from pexpect import popen_spawn
 from enum import Enum, auto
 
+ConfigPath = "./config-feedforward.txt"
 Generation = 0
 ScreenW = 600
 ScreenH = 600
 
 
-class Chess(Enum):
+#chess piece type
+class Piece(Enum):
     You = 1
     Ai = -1
     Empty = 0
@@ -25,14 +28,20 @@ class Chess(Enum):
 
 class Result(Enum):
     ColFull = auto()
-    Won = auto()
-    Tie = auto()
-    Lost = auto()
+    Win = auto()
+    Draw = auto()
+    Lose = auto()
     Other = auto()
 
 
-class GameDebug:
+class GameWindow:
+    def __init__(self, title):
+        pygame.init()
+        pygame.display.set_caption(title)
+        pygame.display.set_mode((ScreenW, ScreenH))
 
+
+class GameBase:
     def __init__(self, lineCount):
         self.lineCount = lineCount
         self.cellSize = 50
@@ -40,15 +49,10 @@ class GameDebug:
         self.screen = pygame.display.get_surface()
         self.screen.fill((255, 255, 255))
         self.chessSurface = pygame.Surface((self.chessSize, self.chessSize))
-        self.drawChessInit()
-        self.drawGeneration()
+        self.drawChess([0] * self.lineCount * self.lineCount)
 
     def input(self, data):
         self.drawChess(data)
-
-    def getFontRect(self, txt):
-        font = pygame.font.SysFont("Arial", 30)
-        return font.render(txt, True, (0, 0, 0)).get_rect()
 
     def drawTxt(self, txt, center):
         font = pygame.font.SysFont("Arial", 30)
@@ -58,32 +62,33 @@ class GameDebug:
         self.screen.blit(txtsurface, txtsurface_rect)
         pygame.display.update()
 
-    def drawFitness(self, score):
-        txt = 'Fitness: ' + str(score)
-        rect = self.getFontRect(txt)
-        self.drawTxt(txt, (rect.width / 2 + 10,
-                           rect.height / 2 + 40))
-
-    def drawGeneration(self):
-        txt = 'Generation: ' + str(Generation)
-        rect = self.getFontRect(txt)
-        self.drawTxt(txt, (rect.width / 2 + 10,
-                           rect.height / 2 + 10))
-
     def drawResult(self, result):
         txt = result.name
         self.drawTxt(txt, (ScreenW / 2, ScreenH - 50))
 
-    def drawChessInit(self):
-        # blue bg
-        self.chessSurface.fill((37, 106, 229))
-        self.drawChess([0] * self.lineCount * self.lineCount)
+    def drawChessForeground(self):
+        lineCount = self.lineCount
+        cellSize = self.cellSize
+        chessSize = self.chessSize
 
-    def drawChess(self, data):
+        chessFG = pygame.Surface((self.chessSize, self.chessSize),
+                                 pygame.SRCALPHA)
+        chessFG.fill((37, 106, 229))
+        for i in range(lineCount):
+            for j in range(lineCount):
+                pos = (cellSize / 2 + cellSize * j,
+                       cellSize / 2 + cellSize * i)
+                pygame.draw.circle(chessFG, (0, 0, 0, 0), pos, 18)
+
+        self.screen.blit(chessFG, ((ScreenW - chessSize) / 2,
+                                   (ScreenH - chessSize) / 2))
+
+    def drawChessBackground(self):
+        self.chessSurface.fill((66, 66, 66))
+
+    def drawPiece(self, data):
         def getColor(piece):
-            if piece == 0:
-                return (66, 66, 66)
-            elif piece == 1:
+            if piece == 1:
                 return (255, 237, 0)
             else:
                 return (224, 32, 26)
@@ -93,24 +98,57 @@ class GameDebug:
         chessSize = self.chessSize
         chessSurface = self.chessSurface
 
-        for i in range(lineCount):
-            for j in range(lineCount):
-                index = i * lineCount + j
-                pos = (cellSize / 2 + cellSize * j,
-                       cellSize / 2 + cellSize * i)
-                color = getColor(data[index])
+        for y in range(lineCount):
+            for x in range(lineCount):
+                index = y * lineCount + x
+                piece = data[index]
+                if piece == 0:
+                    continue
+
+                pos = (cellSize / 2 + cellSize * x,
+                       cellSize / 2 + cellSize * y)
+                color = getColor(piece)
                 pygame.draw.circle(chessSurface, color, pos, 18)
 
         self.screen.blit(chessSurface, ((ScreenW - chessSize) / 2,
                                         (ScreenH - chessSize) / 2))
+
+    def drawChess(self, data):
+        self.drawChessBackground()
+        self.drawPiece(data)
+        self.drawChessForeground()
         pygame.display.update()
 
 
-class Evaluator:
+class GameDebug(GameBase):
+    def __init__(self, lineCount):
+        GameBase.__init__(self, lineCount)
+        self.drawGeneration()
 
-    def __init__(self, chess, size, matrix):
+    def getFontRect(self, txt):
+        font = pygame.font.SysFont("Arial", 30)
+        return font.render(txt, True, (0, 0, 0)).get_rect()
+
+    def drawFitness(self, score):
+        txt = 'Fitness: ' + str(score)
+        rect = self.getFontRect(txt)
+        self.drawTxt(txt, (rect.width / 2 + 10, rect.height / 2 + 40))
+
+    def drawGeneration(self):
+        txt = 'Generation: ' + str(Generation)
+        rect = self.getFontRect(txt)
+        self.drawTxt(txt, (rect.width / 2 + 10, rect.height / 2 + 10))
+
+
+class GameReplay(GameBase):
+    def __init__(self, lineCount):
+        GameBase.__init__(self, lineCount)
+
+
+class Evaluator:
+    def __init__(self, piece, size, matrix):
         self.size = size
-        self.chess = chess
+        self.piece = piece
         self.matrix = matrix
         self.score = {}
         for i in range(2, self.size + 1):
@@ -118,8 +156,8 @@ class Evaluator:
 
     def evaluateLine(self, line):
         groups = [(x, len(list(y))) for x, y in itertools.groupby(line)]
-        for key, count in groups:
-            if (key == self.chess.value) & (count >= 2):
+        for piece, count in groups:
+            if (piece == self.piece.value) & (count >= 2):
                 self.score[count] += 1
 
     def evaluateMatrix(self):
@@ -160,13 +198,15 @@ class Evaluator:
         return self.getScore()
 
 
-class RemotedConnect4:
-
-    def __init__(self):
+class Connect4Commander:
+    def __init__(self, isDebug=True):
         self.proc = popen_spawn.PopenSpawn('GAME230-P1-Connect_Four.exe')
         #,logfile=sys.stdout.buffer
         self.lineCount = 6
-        self.gameDebug = GameDebug(self.lineCount)
+        if isDebug:
+            self.game = GameDebug(self.lineCount)
+        else:
+            self.game = GameReplay(self.lineCount)
 
     def read(self):
         self.proc.expect(': ')
@@ -179,22 +219,22 @@ class RemotedConnect4:
         self.send(arg)
 
     def checkResult(self, text):
-        isTie = 'Tie game!' in text
+        isDraw = 'Draw game!' in text
         isColFull = 'That column is full. Please try a different column' in text
-        isLost = 'Player X has won the game!' in text
-        isWon = 'Player O has won the game!' in text
+        isLose = 'Player X has won the game!' in text
+        isWin = 'Player O has won the game!' in text
         if isColFull:
             return Result.ColFull
-        elif isLost:
-            return Result.Lost
-        elif isTie:
-            return Result.Tie
-        elif isWon:
-            return Result.Won
+        elif isLose:
+            return Result.Lose
+        elif isDraw:
+            return Result.Draw
+        elif isWin:
+            return Result.Win
         else:
             return Result.Other
 
-    def start(self, genome):
+    def start(self, genome, config):
         net = neat.nn.FeedForwardNetwork.create(genome, config)
         genome.fitness = 0
 
@@ -218,16 +258,16 @@ class RemotedConnect4:
             result = self.checkResult(text)
             if result == Result.ColFull:
                 genome.fitness = self.evaluate_reward(input)
-                genome.fitness -= 1000
-                self.gameDebug.drawFitness(genome.fitness)
-                self.gameDebug.drawResult(result)
+                genome.fitness -= 1000  #punish
+                self.game.drawFitness(genome.fitness)
+                self.game.drawResult(result)
                 break
-            elif (result == Result.Tie) | (result == Result.Lost) | (
-                    result == Result.Won):
+            elif (result == Result.Draw) | (result == Result.Lose) | (
+                    result == Result.Win):
                 input = self.get_input()
                 genome.fitness = self.evaluate_reward(input)
-                self.gameDebug.drawFitness(genome.fitness)
-                self.gameDebug.drawResult(result)
+                self.game.drawFitness(genome.fitness)
+                self.game.drawResult(result)
                 break
 
         time.sleep(0.1)
@@ -244,8 +284,8 @@ class RemotedConnect4:
         size = int(math.sqrt(len(data)))
         matrix = np.reshape(np.array(data), (size, size))
 
-        yourScore = Evaluator(Chess.You, size, matrix).evaluate()
-        AiScore = Evaluator(Chess.Ai, size, matrix).evaluate()
+        yourScore = Evaluator(Piece.You, size, matrix).evaluate()
+        AiScore = Evaluator(Piece.Ai, size, matrix).evaluate()
 
         return yourScore - AiScore
 
@@ -257,11 +297,11 @@ class RemotedConnect4:
     # input data
     def get_input(self):
         def getVal(c):
-            chess = Chess.Empty
+            chess = Piece.Empty
             if c == 'O':
-                chess = Chess.You
+                chess = Piece.You
             elif c == 'X':
-                chess = Chess.Ai
+                chess = Piece.Ai
             return chess.value
 
         text = self.get_text()
@@ -269,7 +309,7 @@ class RemotedConnect4:
 
         data = match[len(match) - 1]
         data = [getVal(x) for x in data]
-        self.gameDebug.input(data)
+        self.game.input(data)
 
         return data
 
@@ -281,27 +321,49 @@ class RemotedConnect4:
         os.kill(self.proc.pid, signal.SIGTERM)
 
 
-def run_c4(genomes, config):
-    global Generation
-    Generation += 1
+class Trainer:
+    def isTrained(self, genomes):
+        bestElitism = max(genomes, key=lambda genome: genome[1].fitness)
+        return bestElitism[1].fitness > 100
 
-    for i in range(len(genomes)):
-        c4 = RemotedConnect4()
-        c4.start(genomes[i][1])
+    def saveGenome(self, genomes):
+        elitism = [g for g in genomes if g[1].fitness > 60]
+        with open("elitism.pkl", "wb") as f:
+            pickle.dump(elitism, f)
+
+    def replayGenome(self):
+        config = neat.config.Config(neat.DefaultGenome,
+                                    neat.DefaultReproduction,
+                                    neat.DefaultSpeciesSet,
+                                    neat.DefaultStagnation, ConfigPath)
+        with open('elitism.pkl', "rb") as f:
+            genomes = pickle.load(f)
+
+        for i in range(len(genomes)):
+            #no debug
+            c4 = Connect4Commander(False)
+            c4.start(genomes[i][1], config)
+
+    def run(self, genomes, config):
+        global Generation
+        Generation += 1
+
+        for i in range(len(genomes)):
+            c4 = Connect4Commander()
+            c4.start(genomes[i][1], config)
+
+        if self.isTrained(genomes):
+            self.saveGenome(genomes)
 
 
 if __name__ == "__main__":
-    pygame.init()
-    pygame.display.set_caption('AI vs AI Connect4')
-    pygame.display.set_mode((ScreenW, ScreenH))
-
-    config_path = "./config-feedforward.txt"
     config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
                                 neat.DefaultSpeciesSet, neat.DefaultStagnation,
-                                config_path)
+                                ConfigPath)
     p = neat.Population(config)
     p.add_reporter(neat.StdOutReporter(True))
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
 
-    p.run(run_c4, 1000)
+    GameWindow('AI vs AI Connect4 Trainer')
+    p.run(Trainer().run, 1000)
