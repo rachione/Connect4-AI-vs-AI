@@ -19,7 +19,7 @@ ScreenW = 600
 ScreenH = 600
 
 
-#chess piece type
+# chess piece type
 class Piece(Enum):
     You = 1
     Ai = -1
@@ -31,10 +31,11 @@ class Result(Enum):
     Win = auto()
     Draw = auto()
     Lose = auto()
-    Other = auto()
+    Nope = auto()
 
 
 class GameWindow:
+
     def __init__(self, title):
         pygame.init()
         pygame.display.set_caption(title)
@@ -42,6 +43,7 @@ class GameWindow:
 
 
 class GameBase:
+
     def __init__(self, lineCount):
         self.lineCount = lineCount
         self.cellSize = 50
@@ -50,9 +52,6 @@ class GameBase:
         self.screen.fill((255, 255, 255))
         self.chessSurface = pygame.Surface((self.chessSize, self.chessSize))
         self.drawChess([0] * self.lineCount * self.lineCount)
-
-    def input(self, data):
-        self.drawChess(data)
 
     def drawTxt(self, txt, center):
         font = pygame.font.SysFont("Arial", 30)
@@ -121,6 +120,7 @@ class GameBase:
 
 
 class GameDebug(GameBase):
+
     def __init__(self, lineCount):
         GameBase.__init__(self, lineCount)
         self.drawGeneration()
@@ -141,11 +141,13 @@ class GameDebug(GameBase):
 
 
 class GameReplay(GameBase):
+
     def __init__(self, lineCount):
         GameBase.__init__(self, lineCount)
 
 
 class Evaluator:
+
     def __init__(self, piece, size, matrix):
         self.size = size
         self.piece = piece
@@ -199,6 +201,7 @@ class Evaluator:
 
 
 class Connect4Commander:
+
     def __init__(self, isDebug=True):
         self.proc = popen_spawn.PopenSpawn('GAME230-P1-Connect_Four.exe')
         #,logfile=sys.stdout.buffer
@@ -232,18 +235,25 @@ class Connect4Commander:
         elif isWin:
             return Result.Win
         else:
-            return Result.Other
+            return Result.Nope
 
-    def start(self, genome, config):
-        net = neat.nn.FeedForwardNetwork.create(genome, config)
-        genome.fitness = 0
-
+    def interactiveInit(self):
         args = [str(self.lineCount), str(self.lineCount), '4', '2', '2', '1']
         for arg in args:
             self.readAndSend(arg)
         self.read()
 
-        while True:
+    def replay(self, genome, config):
+        net = neat.nn.FeedForwardNetwork.create(genome, config)
+        self.interactiveInit()
+        pass
+
+    def train(self, genome, config):
+        net = neat.nn.FeedForwardNetwork.create(genome, config)
+        self.interactiveInit()
+
+        result = Result.Nope
+        while result == Result.Nope:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.kill()
@@ -256,21 +266,20 @@ class Connect4Commander:
             text = self.get_text()
 
             result = self.checkResult(text)
-            if result == Result.ColFull:
-                genome.fitness = self.evaluate_reward(input)
-                genome.fitness -= 1000  #punish
-                self.game.drawFitness(genome.fitness)
-                self.game.drawResult(result)
-                break
-            elif (result == Result.Draw) | (result == Result.Lose) | (
-                    result == Result.Win):
-                input = self.get_input()
-                genome.fitness = self.evaluate_reward(input)
-                self.game.drawFitness(genome.fitness)
-                self.game.drawResult(result)
-                break
+            if result != Result.Nope:
+                if result == Result.ColFull:
+                    genome.fitness = self.evaluate_reward(input)
+                    genome.fitness -= 1000  # punish
+                elif (result == Result.Draw) | (result == Result.Lose) | (
+                        result == Result.Win):
+                    input = self.get_input()
+                    genome.fitness = self.evaluate_reward(input)
 
-        time.sleep(0.1)
+                self.game.drawChess(input)
+                self.game.drawFitness(genome.fitness)
+                self.game.drawResult(result)
+
+        time.sleep(0.3)
         self.kill()
 
     def playChess(self, number):
@@ -309,7 +318,6 @@ class Connect4Commander:
 
         data = match[len(match) - 1]
         data = [getVal(x) for x in data]
-        self.game.input(data)
 
         return data
 
@@ -322,6 +330,7 @@ class Connect4Commander:
 
 
 class Trainer:
+
     def isTrained(self, genomes):
         bestElitism = max(genomes, key=lambda genome: genome[1].fitness)
         return bestElitism[1].fitness > 100
@@ -340,9 +349,9 @@ class Trainer:
             genomes = pickle.load(f)
 
         for i in range(len(genomes)):
-            #no debug
+            # no debug
             c4 = Connect4Commander(False)
-            c4.start(genomes[i][1], config)
+            c4.replay(genomes[i][1], config)
 
     def run(self, genomes, config):
         global Generation
@@ -350,7 +359,7 @@ class Trainer:
 
         for i in range(len(genomes)):
             c4 = Connect4Commander()
-            c4.start(genomes[i][1], config)
+            c4.train(genomes[i][1], config)
 
         if self.isTrained(genomes):
             self.saveGenome(genomes)
