@@ -1,6 +1,6 @@
 import pygame
-from train import Trainer, GameDebugWindow
+from train import Trainer, GameWindow
 
 if __name__ == '__main__':
-    GameDebugWindow('AI vs AI Connect4')
+    GameWindow('AI vs AI Connect4')
     Trainer().replayGenome()

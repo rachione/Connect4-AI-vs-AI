@@ -35,7 +35,6 @@ class Result(Enum):
 
 
 class GameWindow:
-
     def __init__(self, title):
         pygame.init()
         pygame.display.set_caption(title)
@@ -43,7 +42,6 @@ class GameWindow:
 
 
 class GameBase:
-
     def __init__(self, lineCount):
         self.lineCount = lineCount
         self.cellSize = 50
@@ -120,7 +118,6 @@ class GameBase:
 
 
 class GameDebug(GameBase):
-
     def __init__(self, lineCount):
         GameBase.__init__(self, lineCount)
         self.drawGeneration()
@@ -141,13 +138,11 @@ class GameDebug(GameBase):
 
 
 class GameReplay(GameBase):
-
     def __init__(self, lineCount):
         GameBase.__init__(self, lineCount)
 
 
 class Evaluator:
-
     def __init__(self, piece, size, matrix):
         self.size = size
         self.piece = piece
@@ -201,10 +196,10 @@ class Evaluator:
 
 
 class Connect4Commander:
-
-    def __init__(self, isDebug=True):
+    def __init__(self, genome, config, isDebug=True):
+        self.genome = genome
+        self.net = neat.nn.FeedForwardNetwork.create(genome, config)
         self.proc = popen_spawn.PopenSpawn('GAME230-P1-Connect_Four.exe')
-        #,logfile=sys.stdout.buffer
         self.lineCount = 6
         if isDebug:
             self.game = GameDebug(self.lineCount)
@@ -243,13 +238,42 @@ class Connect4Commander:
             self.readAndSend(arg)
         self.read()
 
-    def replay(self, genome, config):
-        net = neat.nn.FeedForwardNetwork.create(genome, config)
-        self.interactiveInit()
-        pass
+    def interact(self):
+        # last chess Board
+        inputNodes = self.getChessBoards()[-1]
+        outputNodes = self.net.activate(inputNodes)
+        answer = self.get_answer(outputNodes)
+        self.playChess(answer)
+        text = self.get_text()
+        result = self.checkResult(text)
+        return inputNodes, result
 
-    def train(self, genome, config):
-        net = neat.nn.FeedForwardNetwork.create(genome, config)
+    def replay(self):
+        self.interactiveInit()
+        clock = pygame.time.Clock()
+        result = Result.Nope
+        while result == Result.Nope:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.kill()
+                    sys.exit(0)
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    sys.exit(0)
+
+            inputNodes, result = self.interact()
+            if result != Result.Nope:
+                if (result == Result.Draw) | (result == Result.Lose) | (
+                        result == Result.Win):
+                    inputNodes = self.getChessBoards()[-1]
+                self.game.drawChess(inputNodes)
+                self.game.drawResult(result)
+
+        time.sleep(0.5)
+        self.kill()
+
+    def train(self):
         self.interactiveInit()
 
         result = Result.Nope
@@ -258,25 +282,19 @@ class Connect4Commander:
                 if event.type == pygame.QUIT:
                     self.kill()
                     sys.exit(0)
-            input = self.get_input()
-            genome.fitness = self.evaluate_reward(input)
-            outputs = net.activate(input)
-            answer = self.get_answer(outputs)
-            self.playChess(answer)
-            text = self.get_text()
 
-            result = self.checkResult(text)
+            inputNodes, result = self.interact()
             if result != Result.Nope:
                 if result == Result.ColFull:
-                    genome.fitness = self.evaluate_reward(input)
-                    genome.fitness -= 1000  # punish
+                    self.genome.fitness = self.evaluateReward(inputNodes)
+                    self.genome.fitness -= 1000  # punish
                 elif (result == Result.Draw) | (result == Result.Lose) | (
                         result == Result.Win):
-                    input = self.get_input()
-                    genome.fitness = self.evaluate_reward(input)
+                    inputNodes = self.getChessBoards()[-1]
+                    self.genome.fitness = self.evaluateReward(inputNodes)
 
-                self.game.drawChess(input)
-                self.game.drawFitness(genome.fitness)
+                self.game.drawChess(inputNodes)
+                self.game.drawFitness(self.genome.fitness)
                 self.game.drawResult(result)
 
         time.sleep(0.3)
@@ -288,7 +306,7 @@ class Connect4Commander:
         return text
 
     # calculate fitness
-    def evaluate_reward(self, data):
+    def evaluateReward(self, data):
 
         size = int(math.sqrt(len(data)))
         matrix = np.reshape(np.array(data), (size, size))
@@ -303,8 +321,8 @@ class Connect4Commander:
         return self.proc.before.decode("utf-8").replace('\n',
                                                         '').replace('\r', '')
 
-    # input data
-    def get_input(self):
+    # get input node
+    def getChessBoards(self):
         def getVal(c):
             chess = Piece.Empty
             if c == 'O':
@@ -314,12 +332,14 @@ class Connect4Commander:
             return chess.value
 
         text = self.get_text()
-        match = re.findall('[1-9]([OX.]+)', text)
+        matches = re.findall('[1-9]([OX.]+)', text)
 
-        data = match[len(match) - 1]
-        data = [getVal(x) for x in data]
+        chessBoards = []
+        for match in matches:
+            data = [getVal(x) for x in match]
+            chessBoards.append(data)
 
-        return data
+        return chessBoards
 
     # output data
     def get_answer(self, outputs):
@@ -330,7 +350,6 @@ class Connect4Commander:
 
 
 class Trainer:
-
     def isTrained(self, genomes):
         bestElitism = max(genomes, key=lambda genome: genome[1].fitness)
         return bestElitism[1].fitness > 100
@@ -350,16 +369,16 @@ class Trainer:
 
         for i in range(len(genomes)):
             # no debug
-            c4 = Connect4Commander(False)
-            c4.replay(genomes[i][1], config)
+            c4 = Connect4Commander(genomes[i][1], config, False)
+            c4.replay()
 
     def run(self, genomes, config):
         global Generation
         Generation += 1
 
         for i in range(len(genomes)):
-            c4 = Connect4Commander()
-            c4.train(genomes[i][1], config)
+            c4 = Connect4Commander(genomes[i][1], config)
+            c4.train()
 
         if self.isTrained(genomes):
             self.saveGenome(genomes)
