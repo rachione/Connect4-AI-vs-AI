@@ -240,13 +240,13 @@ class Connect4Commander:
 
     def interact(self):
         # last chess Board
-        inputNodes = self.getChessBoards()[-1]
-        outputNodes = self.net.activate(inputNodes)
+        inputNodeList = self.getChessBoards()
+        outputNodes = self.net.activate(inputNodeList[-1])
         answer = self.get_answer(outputNodes)
         self.playChess(answer)
         text = self.get_text()
         result = self.checkResult(text)
-        return inputNodes, result
+        return inputNodeList, result
 
     def replay(self):
         self.interactiveInit()
@@ -262,12 +262,15 @@ class Connect4Commander:
                 if event.type == pygame.QUIT:
                     sys.exit(0)
 
-            inputNodes, result = self.interact()
+            inputNodeList, result = self.interact()
+            for inputNode in inputNodeList:
+                self.game.drawChess(inputNode)
+                time.sleep(0.2)
             if result != Result.Nope:
                 if (result == Result.Draw) | (result == Result.Lose) | (
                         result == Result.Win):
-                    inputNodes = self.getChessBoards()[-1]
-                self.game.drawChess(inputNodes)
+                    inputNode = self.getChessBoards()[-1]
+                    self.game.drawChess(inputNode)
                 self.game.drawResult(result)
 
         time.sleep(0.5)
@@ -283,17 +286,18 @@ class Connect4Commander:
                     self.kill()
                     sys.exit(0)
 
-            inputNodes, result = self.interact()
+            inputNodeList, result = self.interact()
             if result != Result.Nope:
+                inputNode = inputNodeList[-1]
                 if result == Result.ColFull:
-                    self.genome.fitness = self.evaluateReward(inputNodes)
+                    self.genome.fitness = self.evaluateReward(inputNode)
                     self.genome.fitness -= 1000  # punish
                 elif (result == Result.Draw) | (result == Result.Lose) | (
                         result == Result.Win):
-                    inputNodes = self.getChessBoards()[-1]
-                    self.genome.fitness = self.evaluateReward(inputNodes)
+                    inputNode = self.getChessBoards()[-1]
+                    self.genome.fitness = self.evaluateReward(inputNode)
 
-                self.game.drawChess(inputNodes)
+                self.game.drawChess(inputNode)
                 self.game.drawFitness(self.genome.fitness)
                 self.game.drawResult(result)
 
